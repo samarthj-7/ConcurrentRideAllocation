@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Dashboard</title>
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }
+        .dashboard { max-width: 800px; margin: 0 auto; background: #1e293b; padding: 2rem; border-radius: 12px; }
+        h1 { color: #818cf8; }
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; color: #94a3b8; }
+        input { width: 100%; padding: 0.5rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; box-sizing: border-box; }
+        button { background: #818cf8; color: #0f172a; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 1rem; }
+        button:hover { background: #a5b4fc; }
+        .btn-accept { background: #34d399; margin-top: 0.5rem; }
+        .btn-accept:hover { background: #6ee7b7; }
+        #offers-box { margin-top: 2rem; }
+        .offer-card { background: #0f172a; border: 1px solid #334155; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; }
+        #status-box { margin-top: 2rem; padding: 1rem; background: #0f172a; border: 1px solid #334155; border-radius: 6px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <h1>Driver Dashboard</h1>
+        
+        <div id="setup-section">
+            <h3>Create Driver Profile</h3>
+            <div class="form-group"><label>Name</label><input type="text" id="d-name" value="Jane Smith"></div>
+            <div class="form-group"><label>Email</label><input type="email" id="d-email" value="jane@example.com"></div>
+            <div class="form-group"><label>Phone</label><input type="text" id="d-phone" value="555-9876"></div>
+            <button onclick="createDriver()">Initialize Driver</button>
+        </div>
+
+        <div id="active-section" style="display: none;">
+            <h3>Available Offers</h3>
+            <p>Your Driver ID: <span id="current-driver-id"></span></p>
+            <button onclick="fetchOffers()" style="background: #475569; color: white;">Refresh Offers</button>
+            <div id="offers-box"></div>
+        </div>
+
+        <div id="status-box">
+            <h3 style="margin-top: 0; color: #fcd34d;">Status Updates</h3>
+            <div id="messages"></div>
+        </div>
+    </div>
+
+    <script>
+        let driverId = null;
+        let ws = null;
+
+        async function createDriver() {
+            const name = document.getElementById('d-name').value;
+            const email = document.getElementById('d-email').value + Math.floor(Math.random() * 1000);
+            const phone = document.getElementById('d-phone').value + Math.floor(Math.random() * 1000);
+
+            const res = await fetch('/drivers/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, email, phone})
+            });
+
+            if(res.ok) {
+                const data = await res.json();
+                driverId = data.driver_id;
+                document.getElementById('setup-section').style.display = 'none';
+                document.getElementById('active-section').style.display = 'block';
+                document.getElementById('current-driver-id').innerText = driverId;
+                
+                document.getElementById('status-box').style.display = 'block';
+                addMessage("✅ Driver online and ready.");
+                
+                connectWebSocket();
+            } else {
+                alert("Failed to create driver");
+            }
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws/driver/${driverId}`);
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'new_offer') {
+                    addMessage(`📡 New Offer received for Request ID: ${data.request_id}`);
+                    fetchOffers();
+                }
+            };
+            ws.onopen = () => console.log("WebSocket connected");
+        }
+
+        async function fetchOffers() {
+            const res = await fetch(`/drivers/${driverId}/offers`);
+            if (res.ok) {
+                const offers = await res.json();
+                renderOffers(offers);
+            }
+        }
+
+        function renderOffers(offers) {
+            const box = document.getElementById('offers-box');
+            box.innerHTML = '';
+            
+            if (offers.length === 0) {
+                box.innerHTML = '<p style="color: #94a3b8;">No pending offers at the moment.</p>';
+                return;
+            }
+
+            offers.forEach(o => {
+                const card = document.createElement('div');
+                card.className = 'offer-card';
+                card.id = `offer-${o.offer_id}`;
+                card.innerHTML = `
+                    <strong>Request #${o.request_id}</strong><br>
+                    Pickup: [${o.pickup_lat}, ${o.pickup_lon}]<br>
+                    Dropoff: [${o.dropoff_lat}, ${o.dropoff_lon}]<br>
+                    <button class="btn-accept" onclick="acceptOffer(${o.offer_id}, ${o.request_id})">ACCEPT RIDE</button>
+                `;
+                box.appendChild(card);
+            });
+        }
+
+        async function acceptOffer(offerId, requestId) {
+            addMessage(`⏳ Attempting to accept Offer #${offerId} (Request #${requestId})...`);
+            
+            const res = await fetch(`/offers/${offerId}/accept`, {
+                method: 'POST'
+            });
+
+            const data = await res.json();
+            
+            if (res.ok) {
+                addMessage(`🎉 SUCCESS: You have been assigned Request #${requestId}!`);
+                document.getElementById(`offer-${offerId}`).innerHTML = '<strong style="color: #34d399;">ASSIGNED TO YOU</strong>';
+                // Remove other offers from screen
+                setTimeout(fetchOffers, 2000);
+            } else {
+                if (res.status === 409) {
+                    addMessage(`❌ CONFLICT: Another driver already accepted Request #${requestId} or it was cancelled.`);
+                } else {
+                    addMessage(`❌ ERROR: ${data.detail}`);
+                }
+                document.getElementById(`offer-${offerId}`).remove();
+            }
+        }
+
+        function addMessage(msg) {
+            const div = document.createElement('div');
+            div.style.marginBottom = '10px';
+            div.innerText = msg;
+            document.getElementById('messages').prepend(div);
+        }
+    </script>
+</body>
+</html>

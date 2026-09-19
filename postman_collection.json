@@ -1,0 +1,116 @@
+{
+    "info": {
+        "name": "Concurrent Ride Allocation System",
+        "description": "API endpoints for the Concurrent Ride Allocation System using FastAPI and PostgreSQL.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Riders",
+            "item": [
+                {
+                    "name": "Create Rider",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"Alice (Rider)\",\n    \"email\": \"alice@example.com\",\n    \"phone\": \"555-0100\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost:8088/riders/",
+                            "protocol": "http",
+                            "host": ["localhost"],
+                            "port": "8088",
+                            "path": ["riders", ""]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Ride Request",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"rider_id\": 1,\n    \"pickup_lat\": 37.7749,\n    \"pickup_lon\": -122.4194,\n    \"dropoff_lat\": 37.3382,\n    \"dropoff_lon\": -121.8863\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost:8088/requests/",
+                            "protocol": "http",
+                            "host": ["localhost"],
+                            "port": "8088",
+                            "path": ["requests", ""]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Drivers",
+            "item": [
+                {
+                    "name": "Create Driver",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"Bob (Driver)\",\n    \"email\": \"bob@example.com\",\n    \"phone\": \"555-0200\"\n}"
+                        },
+                        "url": {
+                            "raw": "http://localhost:8088/drivers/",
+                            "protocol": "http",
+                            "host": ["localhost"],
+                            "port": "8088",
+                            "path": ["drivers", ""]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Driver Offers",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost:8088/drivers/1/offers",
+                            "protocol": "http",
+                            "host": ["localhost"],
+                            "port": "8088",
+                            "path": ["drivers", "1", "offers"]
+                        }
+                    }
+                },
+                {
+                    "name": "Accept Offer (Concurrency Test)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "http://localhost:8088/offers/1/accept",
+                            "protocol": "http",
+                            "host": ["localhost"],
+                            "port": "8088",
+                            "path": ["offers", "1", "accept"]
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}
