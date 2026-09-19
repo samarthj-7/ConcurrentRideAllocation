@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | Ride System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #09090b;
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --accent-3: #f59e0b; /* Amber */
+            --success: #10b981;
+            --info: #0ea5e9;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            margin: 0;
+            padding: 2rem;
+            min-height: 100vh;
+            background-color: var(--bg-dark);
+            background-image: radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.15), transparent 40%);
+            font-family: 'Outfit', sans-serif;
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            box-sizing: border-box;
+        }
+
+        .dashboard {
+            width: 100%;
+            max-width: 900px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            padding: 2.5rem;
+            border-radius: 24px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+        }
+
+        .dashboard::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-3), transparent);
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .live-badge {
+            font-size: 1rem;
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--accent-3);
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+        }
+
+        .pulse-dot {
+            width: 8px; height: 8px;
+            background-color: var(--accent-3);
+            border-radius: 50%;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 1.2rem 1rem;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        th {
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        td { font-size: 1rem; }
+
+        tr { transition: background 0.3s; }
+        tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+        .status-badge {
+            padding: 0.3rem 0.8rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+        
+        .status-SEARCHING { background: rgba(14, 165, 233, 0.1); color: var(--info); }
+        .status-ASSIGNED { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+
+        .new-row {
+            animation: highlight 2s ease-out;
+        }
+
+        @keyframes highlight {
+            0% { background: rgba(245, 158, 11, 0.2); }
+            100% { background: transparent; }
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+
+        @keyframes slideUp { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <h1>
+            Global Ride Monitor
+            <div class="live-badge"><div class="pulse-dot"></div> LIVE SYSTEM</div>
+        </h1>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Request ID</th>
+                    <th>Rider ID</th>
+                    <th>Driver ID</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="rides-body">
+                <!-- Data populated dynamically -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Fetch existing rides on load
+        async function fetchRides() {
+            try {
+                const res = await fetch('/admin/rides');
+                const rides = await res.json();
+                rides.forEach(r => appendOrUpdateRow(r));
+            } catch (err) {
+                console.error("Failed to fetch initial rides", err);
+            }
+        }
+
+        function appendOrUpdateRow(data, isNew = false) {
+            const tbody = document.getElementById('rides-body');
+            let row = document.getElementById(`req-${data.request_id}`);
+            
+            if (row) {
+                // Update existing
+                row.querySelector('.driver-cell').innerText = data.driver_id || 'Waiting...';
+                const statusCell = row.querySelector('.status-cell span');
+                statusCell.className = `status-badge status-${data.status}`;
+                statusCell.innerText = data.status;
+                
+                // Flash animation for update
+                row.classList.remove('new-row');
+                void row.offsetWidth; // trigger reflow
+                row.classList.add('new-row');
+            } else {
+                // Insert new
+                row = document.createElement('tr');
+                row.id = `req-${data.request_id}`;
+                if (isNew) row.classList.add('new-row');
+                
+                row.innerHTML = `
+                    <td>#${data.request_id}</td>
+                    <td>Rider ${data.rider_id}</td>
+                    <td class="driver-cell">${data.driver_id || 'Waiting...'}</td>
+                    <td class="status-cell"><span class="status-badge status-${data.status}">${data.status}</span></td>
+                `;
+                
+                // Prepends to the top of the table body
+                tbody.prepend(row);
+            }
+        }
+
+        function connectWebSocket() {
+            const ws = new WebSocket(`ws://${window.location.host}/ws/admin`);
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'ride_created' || data.type === 'ride_assigned') {
+                    // Normalize the payload to match what we expect in appendOrUpdateRow
+                    const normalized = {
+                        request_id: data.request_id,
+                        rider_id: data.rider_id || '?', // rider_id might not be in assignment broadcast if we didn't include it
+                        driver_id: data.driver_id || null,
+                        status: data.status
+                    };
+                    
+                    // If rider_id is missing from broadcast, we shouldn't overwrite it with '?' 
+                    // Let's just update driver_id and status if it already exists
+                    if (data.type === 'ride_assigned') {
+                        const existingRow = document.getElementById(`req-${data.request_id}`);
+                        if(existingRow) {
+                            normalized.rider_id = existingRow.querySelector('td:nth-child(2)').innerText.replace('Rider ', '');
+                        }
+                    }
+
+                    appendOrUpdateRow(normalized, data.type === 'ride_created');
+                }
+            };
+            ws.onopen = () => console.log("Admin WebSocket connected");
+            ws.onclose = () => {
+                console.log("Admin WebSocket disconnected. Reconnecting...");
+                setTimeout(connectWebSocket, 3000);
+            }
+        }
+
+        // Initialize
+        fetchRides();
+        connectWebSocket();
+    </script>
+</body>
+</html>

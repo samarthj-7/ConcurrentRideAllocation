@@ -41,6 +41,8 @@ class ConnectionManager:
         self.active_drivers: dict[int, WebSocket] = {}
         # Maps rider_id to WebSocket
         self.active_riders: dict[int, WebSocket] = {}
+        # List of connected admins
+        self.active_admins: list[WebSocket] = []
         self.lock = threading.Lock()
 
     async def connect_driver(self, websocket: WebSocket, driver_id: int):
@@ -67,6 +69,18 @@ class ConnectionManager:
                 del self.active_riders[rider_id]
         logger.info(f"Rider {rider_id} disconnected")
 
+    async def connect_admin(self, websocket: WebSocket):
+        await websocket.accept()
+        with self.lock:
+            self.active_admins.append(websocket)
+        logger.info("Admin connected")
+
+    def disconnect_admin(self, websocket: WebSocket):
+        with self.lock:
+            if websocket in self.active_admins:
+                self.active_admins.remove(websocket)
+        logger.info("Admin disconnected")
+
     async def send_to_driver(self, driver_id: int, message: dict):
         with self.lock:
             ws = self.active_drivers.get(driver_id)
@@ -85,6 +99,17 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Error sending to rider {rider_id}: {e}")
 
+    async def broadcast_to_admins(self, message: dict):
+        with self.lock:
+            websockets = self.active_admins.copy()
+        
+        for ws in websockets:
+            try:
+                await ws.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to admin: {e}")
+                self.disconnect_admin(ws)
+
 manager = ConnectionManager()
 
 # --- FRONTEND ROUTES ---
@@ -99,6 +124,10 @@ async def rider_dashboard(request: Request):
 @app.get("/driver-dashboard", response_class=HTMLResponse)
 async def driver_dashboard(request: Request):
     return templates.TemplateResponse(request=request, name="driver.html")
+
+@app.get("/admin-dashboard", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    return templates.TemplateResponse(request=request, name="admin.html")
 
 # --- API ROUTES ---
 
@@ -169,6 +198,16 @@ async def create_ride_request(request: RideRequestCreate):
         # For simplicity, we just send a "new_offer" event and driver fetches pending offers.
         await manager.send_to_driver(d_id, {"type": "new_offer", "request_id": request_id})
 
+    # Broadcast to admins
+    await manager.broadcast_to_admins({
+        "type": "ride_created",
+        "request_id": request_id,
+        "rider_id": request.rider_id,
+        "pickup": [request.pickup_lat, request.pickup_lon],
+        "dropoff": [request.dropoff_lat, request.dropoff_lon],
+        "status": "SEARCHING"
+    })
+
     return {"request_id": request_id, "message": "Ride request created, looking for drivers."}
 
 @app.get("/drivers/{driver_id}/offers")
@@ -184,6 +223,26 @@ def get_driver_offers(driver_id: int):
             """, (driver_id,))
             offers = cur.fetchall()
             return offers
+
+@app.get("/admin/rides")
+def get_all_rides():
+    """Fetch all rides for the admin dashboard"""
+    with get_db_connection() as conn:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            cur.execute("""
+                SELECT 
+                    r.request_id, 
+                    r.rider_id, 
+                    r.status, 
+                    r.pickup_lat, r.pickup_lon, 
+                    r.dropoff_lat, r.dropoff_lon,
+                    a.driver_id
+                FROM ride_request r
+                LEFT JOIN assignment a ON r.request_id = a.request_id
+                ORDER BY r.created_at DESC
+            """)
+            rides = cur.fetchall()
+            return rides
 
 
 # --- THE CORE CONCURRENCY ENDPOINT ---
@@ -256,6 +315,14 @@ async def accept_offer(offer_id: int):
         "message": f"Driver {driver_id} has accepted your ride!"
     })
 
+    # Notify Admins
+    await manager.broadcast_to_admins({
+        "type": "ride_assigned",
+        "request_id": request_id,
+        "driver_id": driver_id,
+        "status": "ASSIGNED"
+    })
+
     return {"message": "Offer accepted successfully", "request_id": request_id, "driver_id": driver_id}
 
 
@@ -282,4 +349,15 @@ async def websocket_rider_endpoint(websocket: WebSocket, rider_id: int):
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
         manager.disconnect_rider(rider_id)
+
+@app.websocket("/ws/admin")
+async def websocket_admin_endpoint(websocket: WebSocket):
+    await manager.connect_admin(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        manager.disconnect_admin(websocket)
 
