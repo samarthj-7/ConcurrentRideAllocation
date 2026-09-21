@@ -50,3 +50,12 @@ pytest test_concurrency.py -v -s
 
 ### Postman
 A `postman_collection.json` is included in the repository. You can import it into Postman to easily test the raw API endpoints.
+
+## 5. Demo
+Watch the system in action handling concurrent drivers:
+
+![Concurrency Demo](assets/concurrency_demo.webp)
+
+And the final state of the Admin Panel monitoring all activities:
+
+![Admin Panel Logs Final State](assets/admin_panel_final.png)
