@@ -35,3 +35,7 @@ class RideRequestResponse(BaseModel):
     rider_id: int
     status: str
     created_at: datetime
+
+class RideCancelRequest(BaseModel):
+    cancelled_by: str
+    reason: Optional[str] = None

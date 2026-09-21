@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from .db import get_db_connection
 from .models import (
     RiderCreate, DriverCreate, RideRequestCreate,
-    DriverLocationUpdate
+    DriverLocationUpdate, RideCancelRequest
 )
 
 # Setup logging
@@ -324,6 +324,120 @@ async def accept_offer(offer_id: int):
     })
 
     return {"message": "Offer accepted successfully", "request_id": request_id, "driver_id": driver_id}
+
+@app.post("/requests/{request_id}/cancel")
+async def cancel_ride(request_id: int, cancel_req: RideCancelRequest):
+    """
+    Cancel a ride. Handles concurrency with SELECT ... FOR UPDATE.
+    """
+    with get_db_connection() as conn:
+        with conn.transaction():
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                # 1. Lock the ride request
+                cur.execute("SELECT status, rider_id FROM ride_request WHERE request_id = %s FOR UPDATE", (request_id,))
+                req = cur.fetchone()
+
+                if not req:
+                    raise HTTPException(status_code=404, detail="Ride request not found")
+
+                if req['status'] in ('COMPLETED', 'CANCELLED'):
+                    return {"message": f"Ride is already {req['status']}"}
+
+                # 2. Update request status to CANCELLED
+                cur.execute("UPDATE ride_request SET status = 'CANCELLED' WHERE request_id = %s", (request_id,))
+
+                # 3. Insert cancellation record
+                cur.execute("INSERT INTO cancellation (request_id, reason, cancelled_by) VALUES (%s, %s, %s)", 
+                            (request_id, cancel_req.reason, cancel_req.cancelled_by))
+
+                # 4. If assigned, update driver status to AVAILABLE
+                driver_id = None
+                if req['status'] in ('ASSIGNED', 'IN_PROGRESS'):
+                    cur.execute("SELECT driver_id FROM assignment WHERE request_id = %s", (request_id,))
+                    assign = cur.fetchone()
+                    if assign:
+                        driver_id = assign['driver_id']
+                        cur.execute("UPDATE driver SET availability_status = 'AVAILABLE' WHERE driver_id = %s", (driver_id,))
+                
+                rider_id = req['rider_id']
+    
+    # Notify Rider
+    await manager.send_to_rider(rider_id, {
+        "type": "ride_cancelled",
+        "request_id": request_id,
+        "message": f"Ride was cancelled by {cancel_req.cancelled_by}"
+    })
+
+    # Notify Driver if assigned
+    if driver_id:
+        await manager.send_to_driver(driver_id, {
+            "type": "ride_cancelled",
+            "request_id": request_id,
+            "message": f"Ride was cancelled by {cancel_req.cancelled_by}"
+        })
+
+    # Notify Admins
+    await manager.broadcast_to_admins({
+        "type": "ride_cancelled",
+        "request_id": request_id,
+        "status": "CANCELLED"
+    })
+
+    return {"message": "Ride cancelled successfully"}
+
+@app.post("/requests/{request_id}/complete")
+async def complete_ride(request_id: int):
+    """
+    Mark an assigned ride as completed, free the driver, and broadcast the change.
+    """
+    with get_db_connection() as conn:
+        with conn.transaction():
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                # Get current status and driver
+                cur.execute("""
+                    SELECT r.status, r.rider_id, a.driver_id 
+                    FROM ride_request r
+                    JOIN assignment a ON r.request_id = a.request_id
+                    WHERE r.request_id = %s FOR UPDATE
+                """, (request_id,))
+                ride = cur.fetchone()
+
+                if not ride:
+                    raise HTTPException(status_code=404, detail="Ride assignment not found")
+                
+                if ride['status'] == 'COMPLETED':
+                    return {"message": "Ride is already completed"}
+
+                # Update ride to COMPLETED
+                cur.execute("UPDATE ride_request SET status = 'COMPLETED' WHERE request_id = %s", (request_id,))
+                
+                # Make driver available again
+                cur.execute("UPDATE driver SET availability_status = 'AVAILABLE' WHERE driver_id = %s", (ride['driver_id'],))
+                
+                # Optionally add a payment record
+                cur.execute("SELECT assignment_id FROM assignment WHERE request_id = %s", (request_id,))
+                assignment_id = cur.fetchone()['assignment_id']
+                cur.execute("INSERT INTO payment (assignment_id, amount, status) VALUES (%s, 15.00, 'COMPLETED')", (assignment_id,))
+                
+                rider_id = ride['rider_id']
+                driver_id = ride['driver_id']
+
+    # Notify Rider
+    await manager.send_to_rider(rider_id, {
+        "type": "ride_completed",
+        "request_id": request_id,
+        "message": "You have arrived at your destination!"
+    })
+
+    # Notify Admins
+    await manager.broadcast_to_admins({
+        "type": "ride_assigned", # Using same type to trigger row update on frontend
+        "request_id": request_id,
+        "driver_id": driver_id,
+        "status": "COMPLETED"
+    })
+
+    return {"message": "Ride completed successfully!"}
 
 
 # --- WEBSOCKET ENDPOINTS ---

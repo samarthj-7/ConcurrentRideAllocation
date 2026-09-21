@@ -136,6 +136,14 @@
             transform: translateY(1px);
         }
 
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--glass-border);
+            box-shadow: none;
+            color: var(--text-muted);
+        }
+        .btn-outline:hover { background: rgba(255,255,255,0.05); color: #fff; box-shadow: none; }
+
         #request-section { display: none; text-align: center; }
         
         .rider-id-badge {
@@ -226,10 +234,14 @@
                 <label>Phone Number</label>
             </div>
             <button onclick="createRider()">Initialize Rider</button>
+            <button class="btn-outline" style="margin-top: 1rem;" onclick="window.location.href='/'">Back to Home</button>
         </div>
 
         <div id="request-section">
-            <div class="rider-id-badge">Rider ID: <span id="current-rider-id"></span></div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <div class="rider-id-badge" style="margin-bottom: 0;">Rider ID: <span id="current-rider-id"></span></div>
+                <button class="btn-outline" style="width: auto; padding: 0.4rem 1rem; margin-bottom: 0;" onclick="signOut()">Sign Out</button>
+            </div>
             
             <div class="radar-container" id="radar">
                 <div class="radar"></div>
@@ -238,6 +250,7 @@
             </div>
             
             <button id="request-btn" onclick="requestRide()">Request a Ride</button>
+            <button id="cancel-btn" onclick="cancelRide()" style="display: none; background: #ef4444; margin-top: 1rem; box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.39);">Cancel Ride</button>
         </div>
 
         <div id="status-box">
@@ -247,6 +260,7 @@
 
     <script>
         let riderId = null;
+        let currentRequestId = null;
         let ws = null;
 
         async function createRider() {
@@ -293,6 +307,12 @@
                     btn.style.boxShadow = '0 4px 14px 0 rgba(16, 185, 129, 0.39)';
                     
                     addMessage(`✅ Driver #${data.driver_id} is on the way!`, 'success');
+                } else if (data.type === 'ride_cancelled') {
+                    resetUI();
+                    addMessage(`❌ ${data.message}`);
+                } else if (data.type === 'ride_completed') {
+                    resetUI();
+                    addMessage(`🏁 ${data.message}`, 'success');
                 }
             };
             ws.onopen = () => console.log("WebSocket connected");
@@ -318,12 +338,47 @@
 
             if(res.ok) {
                 const data = await res.json();
+                currentRequestId = data.request_id;
                 addMessage(`📡 Request #${data.request_id} created. Waiting for acceptance...`);
+                document.getElementById('cancel-btn').style.display = 'block';
             } else {
                 document.getElementById('radar').style.display = 'none';
                 btn.style.display = 'block';
                 addMessage("❌ Failed to create request. Try again.");
             }
+        }
+
+        async function cancelRide() {
+            if (!currentRequestId) return;
+            const res = await fetch(`/requests/${currentRequestId}/cancel`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cancelled_by: 'RIDER', reason: 'User requested cancellation'})
+            });
+            if(res.ok) {
+                resetUI();
+            } else {
+                addMessage("❌ Failed to cancel ride.");
+            }
+        }
+
+        function resetUI() {
+            currentRequestId = null;
+            document.getElementById('radar').style.display = 'none';
+            document.getElementById('cancel-btn').style.display = 'none';
+            const btn = document.getElementById('request-btn');
+            btn.style.display = 'block';
+            btn.innerText = "Request a Ride";
+            btn.style.background = 'var(--accent-1)';
+            btn.style.boxShadow = '0 4px 14px 0 rgba(14, 165, 233, 0.39)';
+        }
+
+        function signOut() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            window.location.href = '/';
         }
 
         function addMessage(msg, type = 'normal') {

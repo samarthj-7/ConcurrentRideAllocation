@@ -175,18 +175,36 @@
                 <label>Phone Number</label>
             </div>
             <button onclick="createDriver()">Go Online</button>
+            <button class="btn-outline" style="margin-top: 1rem;" onclick="window.location.href='/'">Back to Home</button>
         </div>
 
         <div id="active-section">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div class="driver-id-badge">Driver ID: <span id="current-driver-id"></span></div>
-                <div class="driver-id-badge" style="background: rgba(16, 185, 129, 0.1); color: var(--success);"><span style="color: var(--success);">● ONLINE</span></div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <div class="driver-id-badge" style="margin-bottom: 0;">Driver ID: <span id="current-driver-id"></span></div>
+                    <div class="driver-id-badge" style="margin-bottom: 0; background: rgba(16, 185, 129, 0.1); color: var(--success);"><span style="color: var(--success);">● ONLINE</span></div>
+                </div>
+                <button class="btn-outline" style="width: auto; padding: 0.4rem 1rem; margin-bottom: 0;" onclick="signOut()">Sign Out</button>
             </div>
             
-            <button class="btn-outline" onclick="fetchOffers()">↻ Refresh Board</button>
+            <button class="btn-outline" id="refresh-btn" onclick="fetchOffers()">↻ Refresh Board</button>
             
             <div id="offers-box">
                 <!-- Offers will render here -->
+            </div>
+            
+            <div id="active-assignment-box" style="display: none;">
+                <div class="offer-card" style="border-color: var(--success);">
+                    <div class="offer-header">
+                        <strong>Active Ride</strong>
+                        <span class="offer-badge" style="background: rgba(16, 185, 129, 0.2); color: var(--success);">IN PROGRESS</span>
+                    </div>
+                    <div class="offer-details">
+                        Current Request ID: <span id="active-request-id"></span>
+                    </div>
+                    <button class="btn-accept" onclick="completeRide()">Complete Ride</button>
+                    <button class="btn-outline" style="margin-top: 1rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.5);" onclick="cancelRide()">Cancel Ride</button>
+                </div>
             </div>
         </div>
 
@@ -197,6 +215,7 @@
 
     <script>
         let driverId = null;
+        let currentActiveRequestId = null;
         let ws = null;
 
         async function createDriver() {
@@ -240,7 +259,14 @@
                 const data = JSON.parse(event.data);
                 if (data.type === 'new_offer') {
                     addMessage(`📡 High-priority offer incoming: Request #${data.request_id}`);
-                    fetchOffers();
+                    if (!currentActiveRequestId) {
+                        fetchOffers();
+                    }
+                } else if (data.type === 'ride_cancelled') {
+                    if (currentActiveRequestId == data.request_id) {
+                        resetToAvailable();
+                        addMessage(`❌ ${data.message}`, 'error');
+                    }
                 }
             };
             ws.onopen = () => console.log("WebSocket connected");
@@ -293,11 +319,13 @@
             
             if (res.ok) {
                 addMessage(`🎉 LOCKED: You successfully acquired Request #${requestId}!`, "success");
-                if(card) {
-                    card.style.opacity = '1';
-                    card.innerHTML = '<div style="text-align: center; color: var(--success); font-weight: 600; padding: 1rem 0;">✅ ASSIGNED TO YOU</div>';
-                }
-                setTimeout(fetchOffers, 2000);
+                currentActiveRequestId = requestId;
+                document.getElementById('offers-box').style.display = 'none';
+                document.getElementById('refresh-btn').style.display = 'none';
+                document.getElementById('active-assignment-box').style.display = 'block';
+                document.getElementById('active-request-id').innerText = requestId;
+                document.querySelector('.driver-id-badge:nth-child(2) span').innerText = '● BUSY';
+                document.querySelector('.driver-id-badge:nth-child(2) span').style.color = '#eab308'; // yellow-ish
             } else {
                 if (res.status === 409 || res.status === 400) {
                     addMessage(`⚠️ MISSED: Another driver claimed Request #${requestId} first.`, "error");
@@ -306,6 +334,52 @@
                 }
                 if(card) card.remove();
             }
+        }
+
+        async function completeRide() {
+            if (!currentActiveRequestId) return;
+            const res = await fetch(`/requests/${currentActiveRequestId}/complete`, {
+                method: 'POST'
+            });
+            if(res.ok) {
+                addMessage("🏁 Ride completed successfully!", "success");
+                resetToAvailable();
+            } else {
+                addMessage("❌ Failed to complete ride.", "error");
+            }
+        }
+
+        async function cancelRide() {
+            if (!currentActiveRequestId) return;
+            const res = await fetch(`/requests/${currentActiveRequestId}/cancel`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cancelled_by: 'DRIVER', reason: 'Driver requested cancellation'})
+            });
+            if(res.ok) {
+                addMessage("❌ You cancelled the ride.", "normal");
+                resetToAvailable();
+            } else {
+                addMessage("❌ Failed to cancel ride.", "error");
+            }
+        }
+
+        function resetToAvailable() {
+            currentActiveRequestId = null;
+            document.getElementById('active-assignment-box').style.display = 'none';
+            document.getElementById('offers-box').style.display = 'flex';
+            document.getElementById('refresh-btn').style.display = 'block';
+            document.querySelector('.driver-id-badge:nth-child(2) span').innerText = '● ONLINE';
+            document.querySelector('.driver-id-badge:nth-child(2) span').style.color = 'var(--success)';
+            fetchOffers();
+        }
+
+        function signOut() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            window.location.href = '/';
         }
 
         function addMessage(msg, type = 'normal') {

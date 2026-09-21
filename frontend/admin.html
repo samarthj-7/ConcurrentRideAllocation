@@ -116,6 +116,8 @@
         
         .status-SEARCHING { background: rgba(14, 165, 233, 0.1); color: var(--info); }
         .status-ASSIGNED { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+        .status-COMPLETED { background: rgba(139, 92, 246, 0.1); color: #a78bfa; }
+        .status-CANCELLED { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
         .new-row {
             animation: highlight 2s ease-out;
@@ -207,7 +209,7 @@
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 
-                if (data.type === 'ride_created' || data.type === 'ride_assigned') {
+                if (data.type === 'ride_created' || data.type === 'ride_assigned' || data.type === 'ride_cancelled') {
                     // Normalize the payload to match what we expect in appendOrUpdateRow
                     const normalized = {
                         request_id: data.request_id,
@@ -218,7 +220,7 @@
                     
                     // If rider_id is missing from broadcast, we shouldn't overwrite it with '?' 
                     // Let's just update driver_id and status if it already exists
-                    if (data.type === 'ride_assigned') {
+                    if (data.type === 'ride_assigned' || data.type === 'ride_cancelled') {
                         const existingRow = document.getElementById(`req-${data.request_id}`);
                         if(existingRow) {
                             normalized.rider_id = existingRow.querySelector('td:nth-child(2)').innerText.replace('Rider ', '');
